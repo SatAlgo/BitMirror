@@ -46,7 +46,12 @@
     max-width: 1300px; margin: auto; padding: 16px;
     display: grid; grid-template-columns: 300px 1fr; gap: 16px;
   }
-  @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+  @media (max-width: 800px) {
+    main { grid-template-columns: 1fr; }
+    .stage { order: -1; min-height: 0; }      /* globe/donut/image first, controls below */
+    #out { max-height: 60vh; }
+    header { padding-top: 16px; }
+  }
 
   .panel {
     border: 1px solid var(--line); background: var(--panel);
@@ -882,6 +887,14 @@ $('copy').addEventListener('click', async () => {
 });
 
 // ================= START =================
+// Phones: lighter defaults so the 3D shapes spin smoothly
+if (window.matchMedia('(max-width: 800px)').matches) {
+  $('cols').value = 90;
+  $('hd').checked = false;
+}
+if (window.matchMedia('(pointer: coarse)').matches) {
+  $('hint').textContent = 'swipe to spin · the light follows your finger';
+}
 updateLabels();
 document.fonts.load(`28px 'Share Tech Mono'`).catch(() => {}).finally(() => startShape('globe'));
 </script>

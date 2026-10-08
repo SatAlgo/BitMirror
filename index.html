@@ -1,0 +1,889 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Binary Vision</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #000;
+    --panel: #030a03;
+    --green: #00ff41;
+    --dim: #008f11;
+    --line: #0a3d12;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--green);
+    font-family: 'Share Tech Mono', monospace;
+    min-height: 100vh;
+  }
+  /* CRT scanlines over the whole page */
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(to bottom, transparent 0, transparent 2px, rgba(0,0,0,.25) 3px);
+  }
+  header { max-width: 1300px; margin: auto; padding: 24px 16px 4px; }
+  h1 {
+    font-size: clamp(28px, 5vw, 48px);
+    letter-spacing: 4px;
+    text-shadow: 0 0 8px var(--green), 0 0 22px rgba(0,255,65,.5);
+  }
+  .tag { color: var(--dim); margin-top: 6px; }
+  .cursor {
+    display: inline-block; width: 10px; height: 1em;
+    background: var(--green); vertical-align: -2px;
+    animation: blink 1s steps(1) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  main {
+    max-width: 1300px; margin: auto; padding: 16px;
+    display: grid; grid-template-columns: 300px 1fr; gap: 16px;
+  }
+  @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+
+  .panel {
+    border: 1px solid var(--line); background: var(--panel);
+    padding: 16px; display: flex; flex-direction: column; gap: 14px;
+    align-self: start;
+  }
+  .section { font-size: 12px; color: var(--dim); letter-spacing: 2px; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+  .drop {
+    border: 1px dashed var(--dim); padding: 20px 12px; text-align: center;
+    cursor: pointer; transition: .2s; line-height: 1.5;
+  }
+  .drop:hover, .drop.over { background: rgba(0,255,65,.08); border-color: var(--green); }
+  .drop small { color: var(--dim); }
+
+  label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+  .row { display: flex; justify-content: space-between; }
+  .val { color: #b6ffc8; }
+  input[type=range] { accent-color: var(--green); width: 100%; }
+  select {
+    background: #000; color: var(--green); border: 1px solid var(--dim);
+    padding: 6px; font-family: inherit; font-size: 14px;
+  }
+  .checks { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 8px; }
+  .check { flex-direction: row; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; }
+  .check input { accent-color: var(--green); width: 16px; height: 16px; flex: none; }
+
+  .buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  button {
+    background: transparent; color: var(--green); border: 1px solid var(--green);
+    padding: 10px; font-family: inherit; font-size: 14px; cursor: pointer; letter-spacing: 1px;
+  }
+  button:hover, button.active { background: var(--green); color: #000; box-shadow: 0 0 12px var(--green); }
+  button.wide { grid-column: span 2; }
+
+  .stage {
+    border: 1px solid var(--line); background: #000;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 8px; min-height: 320px; padding: 8px; overflow: hidden;
+  }
+  #out { max-width: 100%; max-height: 78vh; width: auto; height: auto; touch-action: none; }
+  #out.spin { cursor: grab; }
+  #out.spin:active { cursor: grabbing; }
+  .hint { font-size: 13px; color: var(--dim); }
+  .status { font-size: 13px; color: var(--dim); min-height: 1.2em; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>BINARY//VISION</h1>
+  <p class="tag">&gt; convert any image into 0s and 1s <span class="cursor"></span></p>
+</header>
+
+<main>
+  <section class="panel">
+    <div class="section">3D MODE</div>
+    <div class="buttons">
+      <button id="globeBtn">◉ GLOBE</button>
+      <button id="donutBtn">◎ DONUT</button>
+    </div>
+
+    <div class="section">IMAGE MODE</div>
+    <div class="drop" id="drop">
+      [ DROP IMAGE HERE ]<br><small>click to upload · or paste with Ctrl+V</small>
+      <input type="file" id="file" accept="image/*" hidden>
+    </div>
+
+    <div class="section">SETTINGS</div>
+    <label>
+      <span class="row">Resolution (columns) <span class="val" id="colsVal"></span></span>
+      <input type="range" id="cols" min="40" max="300" value="140">
+    </label>
+    <label>
+      <span class="row">Contrast <span class="val" id="contrastVal"></span></span>
+      <input type="range" id="contrast" min="50" max="300" value="130">
+    </label>
+    <label>
+      <span class="row">Brightness <span class="val" id="brightVal"></span></span>
+      <input type="range" id="bright" min="-50" max="50" value="0">
+    </label>
+    <label>
+      <span class="row">Black cutoff <span class="val" id="thresholdVal"></span></span>
+      <input type="range" id="threshold" min="0" max="90" value="15">
+    </label>
+    <label>
+      <span class="row">Sharpen (images) <span class="val" id="sharpenVal"></span></span>
+      <input type="range" id="sharpen" min="0" max="200" value="70">
+    </label>
+    <label>
+      <span class="row">Edge boost (images) <span class="val" id="edgesVal"></span></span>
+      <input type="range" id="edges" min="0" max="100" value="15">
+    </label>
+    <label>
+      Focus (images)
+      <select id="focus">
+        <option value="person">Person (AI cutout)</option>
+        <option value="spotlight">Center spotlight</option>
+        <option value="off">Off (whole image)</option>
+      </select>
+    </label>
+    <label>
+      <span class="row">Background level <span class="val" id="bgVal"></span></span>
+      <input type="range" id="bg" min="0" max="100" value="30">
+    </label>
+    <label>
+      Digit pattern
+      <select id="mode">
+        <option value="brightness">Brightness (1 = bright, 0 = dim)</option>
+        <option value="dither">Dithered (more 1s where brighter)</option>
+        <option value="random">Random binary</option>
+      </select>
+    </label>
+
+    <div class="checks">
+      <label class="check"><input type="checkbox" id="glow" checked> Neon glow</label>
+      <label class="check"><input type="checkbox" id="scan" checked> Scanlines</label>
+      <label class="check"><input type="checkbox" id="auto" checked> Auto levels</label>
+      <label class="check"><input type="checkbox" id="hd" checked> HD (2×)</label>
+      <label class="check"><input type="checkbox" id="invert"> Invert</label>
+      <label class="check"><input type="checkbox" id="rain" checked> Matrix rain</label>
+    </div>
+
+    <div class="buttons">
+      <button id="replay">REPLAY</button>
+      <button id="copy">COPY TEXT</button>
+      <button id="download" class="wide">DOWNLOAD PNG</button>
+    </div>
+    <div class="status" id="status"></div>
+  </section>
+
+  <section class="stage">
+    <canvas id="out"></canvas>
+    <div class="hint" id="hint">drag to spin · the light follows your cursor</div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+
+// ================= CANVASES =================
+const out = $('out');                       // what you see
+const octx = out.getContext('2d');
+const art = document.createElement('canvas'); // crisp characters only
+const actx = art.getContext('2d');
+const work = document.createElement('canvas'); // image sampling
+const wctx = work.getContext('2d', { willReadFrequently: true });
+
+// ================= STATE =================
+const BASE_FONT = 14;
+let scale = 2, fontPx = 28, cellW = 0, cellH = 0;
+let cols = 0, rows = 0;
+let source = { type: 'shape', shape: 'globe' };
+let img = null;
+let cache = { img: null, cols: 0, rows: 0, raw: null };
+let gridCh = null, gridCol = null;          // per cell: digit (0/1) and color level (-1 = empty)
+let rainId = null, animating = false, loopId = null;
+
+const view = { yaw: 0.6, pitch: 0.35, vyaw: 0.012, vpitch: 0, dragging: false, lx: -0.7, ly: 0.7, lastX: 0, lastY: 0 };
+
+const CH = ['0', '1'];
+// 64 shades of cool green: dark green -> bright green -> a touch of mint at the very top
+// (no red mixed in, so bright areas never turn yellow/warm)
+const PALETTE = Array.from({ length: 64 }, (_, k) => {
+  const t = k / 63;
+  const g = Math.round(45 + 210 * t);
+  const r = t > 0.88 ? Math.round((t - 0.88) / 0.12 * 90) : 0;
+  const b = Math.round(15 + 45 * t + r * 0.6);
+  return `rgb(${r},${g},${b})`;
+});
+
+// ================= PERSON DETECTION (free, runs in the browser) =================
+const MP_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite';
+let segmenter = null, segLoading = null;
+let maskCanvas = null, maskTried = false;
+
+function getSegmenter() {
+  if (segmenter) return Promise.resolve(segmenter);
+  if (!segLoading) {
+    segLoading = (async () => {
+      const { ImageSegmenter, FilesetResolver } = await import(`${MP_URL}/vision_bundle.mjs`);
+      const fileset = await FilesetResolver.forVisionTasks(`${MP_URL}/wasm`);
+      segmenter = await ImageSegmenter.createFromOptions(fileset, {
+        baseOptions: { modelAssetPath: MODEL_URL },
+        runningMode: 'IMAGE',
+        outputCategoryMask: false,
+        outputConfidenceMasks: true,
+      });
+      return segmenter;
+    })().catch(err => { segLoading = null; throw err; });
+  }
+  return segLoading;
+}
+
+// Returns a grayscale canvas: white = person, black = background
+async function personMask(im) {
+  const seg = await getSegmenter();
+  const res = seg.segment(im);
+  const masks = res.confidenceMasks;
+  const m = masks[masks.length - 1];
+  const w = m.width, h = m.height;
+  const data = Float32Array.from(m.getAsFloat32Array());
+  if (res.close) res.close();
+
+  // Safety check: if the "person" is all around the border and missing from
+  // the middle, the mask is flipped, so invert it
+  let edge = 0, ne = 0, mid = 0, nm = 0;
+  for (let y = 0; y < h; y += 4) for (let x = 0; x < w; x += 4) {
+    const v = data[y * w + x];
+    if (x < w * 0.08 || x > w * 0.92 || y < h * 0.08) { edge += v; ne++; }
+    else if (Math.abs(x / w - 0.5) < 0.2 && Math.abs(y / h - 0.5) < 0.25) { mid += v; nm++; }
+  }
+  const flip = ne && nm && edge / ne > 0.6 && mid / nm < 0.4;
+
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const x = c.getContext('2d');
+  const id = x.createImageData(w, h);
+  for (let i = 0; i < w * h; i++) {
+    const v = Math.round((flip ? 1 - data[i] : data[i]) * 255);
+    id.data[i * 4] = id.data[i * 4 + 1] = id.data[i * 4 + 2] = v;
+    id.data[i * 4 + 3] = 255;
+  }
+  x.putImageData(id, 0, 0);
+  return c;
+}
+
+function withTimeout(p, ms) {
+  return Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+}
+
+async function detectPerson(im) {
+  maskTried = true;
+  $('status').textContent = '> scanning for person... (first time loads the AI model)';
+  try {
+    const c = await withTimeout(personMask(im), 30000);
+    if (img === im) {
+      maskCanvas = c;
+      cache.mask = null;
+      $('status').textContent = '> person locked. background dimmed';
+    }
+  } catch (e) {
+    console.warn('Person detection failed:', e);
+    if (img === im) $('status').textContent = '> AI unavailable (offline?). using center spotlight';
+  }
+}
+
+function opts() {
+  return {
+    cols: +$('cols').value,
+    contrast: +$('contrast').value / 100,
+    bright: +$('bright').value / 100,
+    threshold: +$('threshold').value / 100,
+    sharpen: +$('sharpen').value / 100,
+    edges: +$('edges').value / 100,
+    focus: $('focus').value,
+    bgLevel: +$('bg').value / 100,
+    mode: $('mode').value,
+    invert: $('invert').checked,
+    glow: $('glow').checked,
+    scan: $('scan').checked,
+    auto: $('auto').checked,
+    hd: $('hd').checked,
+    rain: $('rain').checked,
+  };
+}
+
+function updateLabels() {
+  $('colsVal').textContent = $('cols').value;
+  $('contrastVal').textContent = $('contrast').value + '%';
+  $('brightVal').textContent = $('bright').value;
+  $('thresholdVal').textContent = $('threshold').value + '%';
+  $('sharpenVal').textContent = $('sharpen').value + '%';
+  $('edgesVal').textContent = $('edges').value + '%';
+  $('bgVal').textContent = $('bg').value + '%';
+}
+
+const font = () => `${fontPx}px 'Share Tech Mono', monospace`;
+
+function metrics(s) {
+  scale = s;
+  fontPx = BASE_FONT * s;
+  actx.font = font();
+  cellW = Math.ceil(actx.measureText('0').width);
+  cellH = fontPx;
+}
+
+function ensureSize() {
+  const W = cols * cellW, H = rows * cellH;
+  if (art.width !== W || art.height !== H) {
+    art.width = out.width = W;
+    art.height = out.height = H;
+  }
+}
+
+// ================= IMAGE -> BRIGHTNESS GRID =================
+// Shrink in halves first so every grid cell is a true average of its pixels
+// (one big jump to a tiny size skips pixels and looks blocky/noisy).
+function downscale(src, w, h) {
+  let cur = src, cw = src.width, ch = src.height;
+  while (cw > w * 2 && ch > h * 2) {
+    const t = document.createElement('canvas');
+    t.width = Math.ceil(cw / 2);
+    t.height = Math.ceil(ch / 2);
+    const c = t.getContext('2d');
+    c.imageSmoothingQuality = 'high';
+    c.drawImage(cur, 0, 0, t.width, t.height);
+    cur = t; cw = t.width; ch = t.height;
+  }
+  work.width = w; work.height = h;
+  wctx.imageSmoothingQuality = 'high';
+  wctx.fillStyle = '#000';
+  wctx.fillRect(0, 0, w, h);          // transparent areas become black
+  wctx.drawImage(cur, 0, 0, w, h);
+  const d = wctx.getImageData(0, 0, w, h).data;
+  const L = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    const p = i * 4;
+    L[i] = (0.299 * d[p] + 0.587 * d[p + 1] + 0.114 * d[p + 2]) / 255;
+  }
+  return L;
+}
+
+function processImage(raw, o) {
+  const n = cols * rows;
+  let L = Float32Array.from(raw);
+
+  // Auto levels: stretch so the darkest 1% is black and brightest 1% is white
+  if (o.auto) {
+    const hist = new Uint32Array(256);
+    for (let i = 0; i < n; i++) hist[Math.min(255, (L[i] * 255) | 0)]++;
+    let acc = 0, lo = 0, hi = 255;
+    for (let b = 0; b < 256; b++) { acc += hist[b]; if (acc >= n * 0.01) { lo = b; break; } }
+    acc = 0;
+    for (let b = 255; b >= 0; b--) { acc += hist[b]; if (acc >= n * 0.01) { hi = b; break; } }
+    if (hi - lo > 12) {
+      const a = lo / 255, s = 255 / (hi - lo);
+      for (let i = 0; i < n; i++) L[i] = Math.min(1, Math.max(0, (L[i] - a) * s));
+    }
+  }
+
+  const at = (A, x, y) => A[Math.min(rows - 1, Math.max(0, y)) * cols + Math.min(cols - 1, Math.max(0, x))];
+
+  if (o.sharpen > 0 || o.edges > 0) {
+    const base = L;
+    L = new Float32Array(n);
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        const i = y * cols + x;
+        const tl = at(base, x - 1, y - 1), t = at(base, x, y - 1), tr = at(base, x + 1, y - 1);
+        const l = at(base, x - 1, y), c = base[i], r = at(base, x + 1, y);
+        const bl = at(base, x - 1, y + 1), b = at(base, x, y + 1), br = at(base, x + 1, y + 1);
+        let v = c;
+        // Unsharp mask: push each cell away from its neighbourhood average
+        const blur = (tl + t + tr + l + c + r + bl + b + br) / 9;
+        v += o.sharpen * (c - blur);
+        // Sobel edges: brighten outlines so faces and shapes read clearly
+        if (o.edges > 0) {
+          const gx = (tr + 2 * r + br) - (tl + 2 * l + bl);
+          const gy = (bl + 2 * b + br) - (tl + 2 * t + tr);
+          v += o.edges * Math.hypot(gx, gy) * 0.5;
+        }
+        L[i] = v;
+      }
+    }
+  }
+
+  // Focus: keep the subject at full brightness, quiet the background down
+  const w = focusWeights(o);
+  if (w) {
+    const bg = o.bgLevel;
+    for (let i = 0; i < n; i++) L[i] *= bg + (1 - bg) * w[i];
+  }
+  return L;
+}
+
+// 1 = subject, 0 = background, for every grid cell
+function focusWeights(o) {
+  if (o.focus === 'off') return null;
+  const n = cols * rows;
+
+  if (o.focus === 'person' && maskCanvas) {
+    if (!cache.mask || cache.mask.length !== n) {
+      const raw = downscale(maskCanvas, cols, rows);
+      // soften the cutout edge a little so it doesn't look pasted on
+      const m = new Float32Array(n);
+      for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
+        let s = 0, k = 0;
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+          const yy = y + dy, xx = x + dx;
+          if (yy < 0 || yy >= rows || xx < 0 || xx >= cols) continue;
+          s += raw[yy * cols + xx]; k++;
+        }
+        m[y * cols + x] = Math.min(1, (s / k) * 1.25);
+      }
+      cache.mask = m;
+    }
+    return cache.mask;
+  }
+
+  // Center spotlight (also the fallback while/if the AI isn't available)
+  const m = new Float32Array(n);
+  for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
+    const dx = (x / cols - 0.5) / 0.42, dy = (y / rows - 0.45) / 0.5;
+    const t = Math.min(1, Math.max(0, (1.15 - Math.hypot(dx, dy)) / 0.5));
+    m[y * cols + x] = t * t * (3 - 2 * t);
+  }
+  return m;
+}
+
+// ================= 3D SHAPES =================
+// Rotation = tilt (pitch, around X) applied after spin (yaw, around Y)
+function rotMatrix(y, p) {
+  const cy = Math.cos(y), sy = Math.sin(y), cp = Math.cos(p), sp = Math.sin(p);
+  return [cy, 0, sy,
+          sp * sy, cp, -sp * cy,
+          -cp * sy, sp, cp * cy];
+}
+
+function lightDir() {
+  const x = view.lx, y = view.ly, z = 1;
+  const len = Math.hypot(x, y, z);
+  return [x / len, y / len, z / len];
+}
+
+function star(c, r) {
+  const h = Math.sin(c * 127.1 + r * 311.7) * 43758.5453;
+  const f = h - Math.floor(h);
+  return f < 0.004 ? 0.35 + f * 150 : 0;
+}
+
+function globeLum() {
+  const L = new Float32Array(cols * rows);
+  const W = cols * cellW, H = rows * cellH;
+  const R = 0.44 * Math.min(W, H), cx = W / 2, cy = H / 2;
+  const M = rotMatrix(view.yaw, view.pitch);
+  const [lx, ly, lz] = lightDir();
+  const hl = Math.hypot(lx, ly, lz + 1);
+  const hx = lx / hl, hy = ly / hl, hz = (lz + 1) / hl;   // half vector for shine
+  const DEG = 180 / Math.PI, STEP = 15, LINE = 1.7;
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const i = r * cols + c;
+      const nx = ((c + 0.5) * cellW - cx) / R;
+      const ny = -((r + 0.5) * cellH - cy) / R;
+      const d2 = nx * nx + ny * ny;
+      if (d2 > 1) {
+        // faint atmosphere just outside the edge, plus a few stars
+        const halo = d2 < 1.12 ? (1.12 - d2) / 0.12 * 0.45 : 0;
+        L[i] = Math.max(halo, star(c, r));
+        continue;
+      }
+      const nz = Math.sqrt(1 - d2);
+      // surface point back in globe coordinates (transpose = inverse rotation)
+      const ox = M[0] * nx + M[3] * ny + M[6] * nz;
+      const oy = M[1] * nx + M[4] * ny + M[7] * nz;
+      const oz = M[2] * nx + M[5] * ny + M[8] * nz;
+      const lat = Math.asin(Math.max(-1, Math.min(1, oy))) * DEG;
+      const lon = Math.atan2(ox, oz) * DEG;
+      const dLat = Math.abs(lat / STEP - Math.round(lat / STEP)) * STEP;
+      const dLon = Math.abs(lon / STEP - Math.round(lon / STEP)) * STEP * Math.cos(lat / DEG);
+      const onLine = dLat < LINE || dLon < LINE;
+
+      const diff = Math.max(0, nx * lx + ny * ly + nz * lz);
+      const spec = Math.pow(Math.max(0, nx * hx + ny * hy + nz * hz), 40);
+      const rim = Math.pow(1 - nz, 3);
+      let v = 0.1 + 0.5 * diff + 0.6 * spec + 0.3 * rim;
+      if (onLine) v = 0.42 + 0.55 * diff + 0.4 * spec;
+      L[i] = Math.min(1, v);
+    }
+  }
+  return L;
+}
+
+// Classic spinning donut: sample points on the torus, project, keep the nearest
+function donutLum() {
+  const n = cols * rows;
+  const L = new Float32Array(n);
+  const Z = new Float32Array(n);
+  const W = cols * cellW, H = rows * cellH;
+  const R1 = 1, R2 = 2, K2 = 6;
+  const K1 = Math.min(W, H) * K2 * 0.4 / (R1 + R2);
+  const M = rotMatrix(view.yaw, view.pitch);
+  const [lx, ly, lz] = lightDir();
+  const hl = Math.hypot(lx, ly, lz + 1);
+  const hx = lx / hl, hy = ly / hl, hz = (lz + 1) / hl;
+  const nT = Math.ceil(cols * 1.2), nP = Math.ceil(cols * 3.2);
+
+  for (let a = 0; a < nT; a++) {
+    const th = a / nT * Math.PI * 2, ct = Math.cos(th), st = Math.sin(th);
+    for (let b = 0; b < nP; b++) {
+      const ph = b / nP * Math.PI * 2, cp = Math.cos(ph), sp = Math.sin(ph);
+      const ring = R2 + R1 * ct;
+      const px = ring * cp, py = R1 * st, pz = ring * sp;
+      const qx = ct * cp, qy = st, qz = ct * sp;
+      const x = M[0] * px + M[1] * py + M[2] * pz;
+      const y = M[3] * px + M[4] * py + M[5] * pz;
+      const z = M[6] * px + M[7] * py + M[8] * pz;
+      const ooz = 1 / (K2 - z);
+      const c = Math.floor((W / 2 + K1 * x * ooz) / cellW);
+      const r = Math.floor((H / 2 - K1 * y * ooz) / cellH);
+      if (c < 0 || c >= cols || r < 0 || r >= rows) continue;
+      const i = r * cols + c;
+      if (ooz <= Z[i]) continue;
+      Z[i] = ooz;
+      const nx = M[0] * qx + M[1] * qy + M[2] * qz;
+      const ny = M[3] * qx + M[4] * qy + M[5] * qz;
+      const nz = M[6] * qx + M[7] * qy + M[8] * qz;
+      const diff = Math.max(0, nx * lx + ny * ly + nz * lz);
+      const spec = Math.pow(Math.max(0, nx * hx + ny * hy + nz * hz), 30);
+      L[i] = Math.min(1, 0.27 + 0.6 * diff + 0.5 * spec);
+    }
+  }
+  for (let i = 0; i < n; i++) if (Z[i] === 0) L[i] = star(i % cols, (i / cols) | 0);
+  return L;
+}
+
+// ================= BRIGHTNESS -> 0s AND 1s =================
+function mapCells(L, o) {
+  const n = cols * rows;
+  if (!gridCh || gridCh.length !== n) { gridCh = new Uint8Array(n); gridCol = new Int16Array(n); }
+  // Seeded random so digits stay put while you change settings
+  let seed = 1234567;
+  const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+
+  for (let i = 0; i < n; i++) {
+    const rnd = rand();
+    let v = (L[i] - 0.5) * o.contrast + 0.5 + o.bright;
+    v = Math.min(1, Math.max(0, v));
+    if (o.invert) v = 1 - v;
+    if (v < o.threshold) { gridCol[i] = -1; continue; }
+    const t = (v - o.threshold) / ((1 - o.threshold) || 1);
+    let one;
+    if (o.mode === 'random') one = rnd < 0.5;
+    else if (o.mode === 'dither') one = rnd < t;
+    else one = t > 0.5;
+    gridCh[i] = one ? 1 : 0;
+    gridCol[i] = Math.round(t * 63);
+  }
+}
+
+// ================= DRAWING =================
+function cellXY(i) { return [(i % cols) * cellW, ((i / cols) | 0) * cellH]; }
+
+function prepArt() {
+  actx.clearRect(0, 0, art.width, art.height);   // transparent, so glow shows between digits
+  actx.font = font();
+  actx.textBaseline = 'top';
+}
+
+function drawCell(i) {
+  const [x, y] = cellXY(i);
+  actx.fillStyle = PALETTE[gridCol[i]];
+  actx.fillText(CH[gridCh[i]], x, y);
+}
+
+function drawArtFull() {
+  prepArt();
+  let last = -2;
+  for (let i = 0; i < gridCol.length; i++) {
+    const k = gridCol[i];
+    if (k < 0) continue;
+    if (k !== last) { actx.fillStyle = PALETTE[k]; last = k; }
+    const [x, y] = cellXY(i);
+    actx.fillText(CH[gridCh[i]], x, y);
+  }
+}
+
+function compose(extra, allowGlow = true) {
+  const o = opts();
+  octx.globalCompositeOperation = 'source-over';
+  octx.globalAlpha = 1;
+  octx.filter = 'none';
+  octx.fillStyle = '#000';
+  octx.fillRect(0, 0, out.width, out.height);
+
+  if (o.glow && allowGlow) {
+    // Soft blurred copy underneath, sharp digits drawn normally on top.
+    // (Not additive, so dense bright areas don't blow out into yellow/white.)
+    octx.filter = `blur(${4 * scale}px)`;
+    octx.globalAlpha = 0.55;
+    octx.drawImage(art, 0, 0);
+    octx.filter = 'none';
+    octx.globalAlpha = 1;
+  }
+  octx.drawImage(art, 0, 0);
+
+  if (extra) extra(octx);
+
+  if (o.scan) {
+    octx.fillStyle = 'rgba(0,0,0,0.28)';
+    const step = 3 * scale;
+    for (let y = 0; y < out.height; y += step) octx.fillRect(0, y, out.width, scale);
+  }
+}
+
+// ================= MATRIX RAIN (image mode) =================
+function animateRain() {
+  stopRain();
+  prepArt();
+  animating = true;
+
+  const heads = Array.from({ length: cols }, () => -Math.random() * rows * 0.8);
+  const speeds = Array.from({ length: cols }, () => 0.4 + Math.random() * 0.6);
+  const revealed = new Int32Array(cols);
+  const factor = Math.max(0.3, rows / 60);
+  const trail = 8;
+
+  function frame() {
+    let done = true;
+    for (let c = 0; c < cols; c++) {
+      heads[c] += speeds[c] * factor;
+      const h = Math.min(Math.floor(heads[c]), rows);
+      while (revealed[c] < h) {
+        const i = revealed[c] * cols + c;
+        if (gridCol[i] >= 0) drawCell(i);
+        revealed[c]++;
+      }
+      if (revealed[c] < rows || heads[c] - trail < rows) done = false;
+    }
+
+    compose(ctx => {
+      ctx.font = font();
+      ctx.textBaseline = 'top';
+      for (let c = 0; c < cols; c++) {
+        const h = Math.floor(heads[c]);
+        for (let k = 0; k <= trail; k++) {
+          const r = h - k;
+          if (r < 0 || r >= rows) continue;
+          ctx.fillStyle = '#000';
+          ctx.fillRect(c * cellW, r * cellH, cellW, cellH);
+          ctx.fillStyle = k === 0 ? '#eaffee' : `rgba(0,255,65,${1 - k / trail})`;
+          ctx.fillText(Math.random() < 0.5 ? '0' : '1', c * cellW, r * cellH);
+        }
+      }
+    }, false);
+
+    if (done) { animating = false; drawArtFull(); compose(); }
+    else rainId = requestAnimationFrame(frame);
+  }
+  rainId = requestAnimationFrame(frame);
+}
+
+function stopRain() {
+  cancelAnimationFrame(rainId);
+  animating = false;
+}
+
+// ================= RENDER: IMAGE =================
+function renderImage(withRain = false) {
+  if (source.type !== 'image' || !img) return;
+  stopRain();
+  const o = opts();
+  metrics(o.hd ? 2 : 1);
+  cols = o.cols;
+  rows = Math.max(1, Math.round(cols * (img.height / img.width) * (cellW / cellH)));
+  if (scale > 1 && rows * cellH > 16000) metrics(1);   // stay under browser canvas limits
+
+  if (cache.img !== img || cache.cols !== cols || cache.rows !== rows) {
+    cache = { img, cols, rows, raw: downscale(img, cols, rows) };
+  }
+  mapCells(processImage(cache.raw, o), o);
+  ensureSize();
+
+  if (withRain && o.rain) animateRain();
+  else { drawArtFull(); compose(); }
+}
+
+let pending = false;
+function scheduleRender() {
+  if (source.type !== 'image' || pending) return;   // 3D mode re-renders every frame anyway
+  pending = true;
+  requestAnimationFrame(() => { pending = false; renderImage(false); });
+}
+
+// ================= RENDER: 3D LOOP =================
+function shapeFrame() {
+  const o = opts();
+  metrics(o.hd ? 2 : 1);
+  cols = o.cols;
+  rows = Math.max(1, Math.round(cols * (cellW / cellH) * 0.75));   // 4:3 stage
+  ensureSize();
+  const L = source.shape === 'globe' ? globeLum() : donutLum();
+  mapCells(L, o);
+  drawArtFull();
+  compose();
+}
+
+function loop() {
+  if (source.type !== 'shape') { loopId = null; return; }
+  if (!view.dragging) {
+    view.yaw += view.vyaw;
+    view.vyaw = view.vyaw * 0.96 + 0.012 * 0.04;   // drift back to a gentle auto-spin
+    view.pitch = Math.max(-1.45, Math.min(1.45, view.pitch + view.vpitch));
+    view.vpitch *= 0.9;
+  }
+  shapeFrame();
+  loopId = requestAnimationFrame(loop);
+}
+
+function startShape(shape) {
+  stopRain();
+  source = { type: 'shape', shape };
+  view.pitch = shape === 'globe' ? 0.35 : 0.9;
+  view.vyaw = 0.012; view.vpitch = 0;
+  $('globeBtn').classList.toggle('active', shape === 'globe');
+  $('donutBtn').classList.toggle('active', shape === 'donut');
+  $('hint').style.display = '';
+  out.classList.add('spin');
+  $('status').textContent = `> 3D ${shape} online. upload an image any time`;
+  if (!loopId) loopId = requestAnimationFrame(loop);
+}
+
+// ================= DRAG TO SPIN, LIGHT FOLLOWS CURSOR =================
+function aimLight(e) {
+  const rect = out.getBoundingClientRect();
+  const mx = (e.clientX - rect.left) / rect.width * 2 - 1;
+  const my = (e.clientY - rect.top) / rect.height * 2 - 1;
+  view.lx = mx * 1.6;
+  view.ly = -my * 1.6;
+}
+
+out.addEventListener('pointerdown', e => {
+  if (source.type !== 'shape') return;
+  view.dragging = true;
+  view.lastX = e.clientX; view.lastY = e.clientY;
+  view.vyaw = 0; view.vpitch = 0;
+  out.setPointerCapture(e.pointerId);
+});
+out.addEventListener('pointermove', e => {
+  if (source.type !== 'shape') return;
+  aimLight(e);
+  if (!view.dragging) return;
+  const dx = e.clientX - view.lastX, dy = e.clientY - view.lastY;
+  view.lastX = e.clientX; view.lastY = e.clientY;
+  view.yaw += dx * 0.01;
+  view.pitch = Math.max(-1.45, Math.min(1.45, view.pitch + dy * 0.01));
+  view.vyaw = dx * 0.01;      // keeps spinning after you let go
+  view.vpitch = dy * 0.01;
+});
+const endDrag = () => { view.dragging = false; };
+out.addEventListener('pointerup', endDrag);
+out.addEventListener('pointercancel', endDrag);
+
+// ================= LOADING IMAGES =================
+function loadFile(file) {
+  if (!file || !file.type.startsWith('image/')) {
+    $('status').textContent = '> error: not an image file';
+    return;
+  }
+  const url = URL.createObjectURL(file);
+  const im = new Image();
+  im.onload = async () => {
+    img = im;
+    maskCanvas = null; maskTried = false;
+    source = { type: 'image' };
+    cancelAnimationFrame(loopId); loopId = null;
+    $('globeBtn').classList.remove('active');
+    $('donutBtn').classList.remove('active');
+    $('hint').style.display = 'none';
+    out.classList.remove('spin');
+    $('status').textContent = `> loaded ${file.name} (${im.width}x${im.height})`;
+    if ($('focus').value === 'person') await detectPerson(im);
+    if (img === im) renderImage(true);
+  };
+  im.onerror = () => { $('status').textContent = '> error: could not read image'; };
+  im.src = url;
+}
+
+// ================= UI WIRING =================
+const drop = $('drop');
+drop.addEventListener('click', () => $('file').click());
+$('file').addEventListener('change', e => { loadFile(e.target.files[0]); e.target.value = ''; });
+['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => {
+  e.preventDefault(); drop.classList.add('over');
+}));
+['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => {
+  e.preventDefault(); drop.classList.remove('over');
+}));
+drop.addEventListener('drop', e => loadFile(e.dataTransfer.files[0]));
+window.addEventListener('paste', e => {
+  const item = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith('image/'));
+  if (item) loadFile(item.getAsFile());
+});
+
+$('globeBtn').addEventListener('click', () => startShape('globe'));
+$('donutBtn').addEventListener('click', () => startShape('donut'));
+
+$('focus').addEventListener('change', async () => {
+  if ($('focus').value === 'person' && img && !maskCanvas && !maskTried) await detectPerson(img);
+  scheduleRender();
+});
+
+['cols', 'contrast', 'bright', 'threshold', 'sharpen', 'edges', 'bg'].forEach(id =>
+  $(id).addEventListener('input', () => { updateLabels(); scheduleRender(); }));
+['mode', 'invert', 'glow', 'scan', 'auto', 'hd'].forEach(id =>
+  $(id).addEventListener('change', scheduleRender));
+
+$('replay').addEventListener('click', () => {
+  if (source.type !== 'image') { $('status').textContent = '> replay works on uploaded images'; return; }
+  renderImage(false);
+  animateRain();
+});
+
+$('download').addEventListener('click', () => {
+  if (animating) { stopRain(); drawArtFull(); compose(); }
+  out.toBlob(blob => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'binary-art.png';
+    a.click();
+    $('status').textContent = `> saved ${out.width}x${out.height} PNG`;
+  });
+});
+
+$('copy').addEventListener('click', async () => {
+  let text = '';
+  for (let r = 0; r < rows; r++) {
+    let line = '';
+    for (let c = 0; c < cols; c++) {
+      const i = r * cols + c;
+      line += gridCol[i] >= 0 ? CH[gridCh[i]] : ' ';
+    }
+    text += line.replace(/\s+$/, '') + '\n';
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    $('status').textContent = '> binary text copied to clipboard';
+  } catch {
+    $('status').textContent = '> clipboard blocked by browser';
+  }
+});
+
+// ================= START =================
+updateLabels();
+document.fonts.load(`28px 'Share Tech Mono'`).catch(() => {}).finally(() => startShape('globe'));
+</script>
+</body>
+</html>
